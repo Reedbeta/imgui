@@ -2387,12 +2387,12 @@ static void ImFontAtlasBuildRenderDefaultTexData(ImFontAtlas* atlas)
     }
     else
     {
-        // Render 4 white pixels
-        IM_ASSERT(r->Width == 2 && r->Height == 2);
+        // NRR: Render 3x1 white pixels
+        IM_ASSERT(r->Width == 3 && r->Height == 1);
         const int offset = (int)r->X + (int)r->Y * w;
-        atlas->TexPixelsAlpha8[offset] = atlas->TexPixelsAlpha8[offset + 1] = atlas->TexPixelsAlpha8[offset + w] = atlas->TexPixelsAlpha8[offset + w + 1] = 0xFF;
+        atlas->TexPixelsAlpha8[offset] = atlas->TexPixelsAlpha8[offset + 1] = atlas->TexPixelsAlpha8[offset + 2] = 0xFF;
     }
-    atlas->TexUvWhitePixel = ImVec2((r->X + 0.5f) * atlas->TexUvScale.x, (r->Y + 0.5f) * atlas->TexUvScale.y);
+    atlas->TexUvWhitePixel = ImVec2((r->X + 1.5f) * atlas->TexUvScale.x, (r->Y + 0.5f) * atlas->TexUvScale.y);
 }
 
 static void ImFontAtlasBuildRenderLinesTexData(ImFontAtlas* atlas)
@@ -2435,7 +2435,8 @@ void ImFontAtlasBuildInit(ImFontAtlas* atlas)
         if (!(atlas->Flags & ImFontAtlasFlags_NoMouseCursors))
             atlas->PackIdMouseCursors = atlas->AddCustomRectRegular(FONT_ATLAS_DEFAULT_TEX_DATA_W_HALF * 2 + 1, FONT_ATLAS_DEFAULT_TEX_DATA_H);
         else
-            atlas->PackIdMouseCursors = atlas->AddCustomRectRegular(2, 2);
+            // NRR: 3x1 rect for subpixel rendering purposes
+            atlas->PackIdMouseCursors = atlas->AddCustomRectRegular(3, 1);
     }
 
     // Register texture region for thick lines

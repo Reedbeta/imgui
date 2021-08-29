@@ -1,4 +1,4 @@
-// dear imgui, v1.84 WIP
+// dear imgui, v1.85 WIP
 // (widgets code)
 
 /*
@@ -152,9 +152,13 @@ void ImGui::TextEx(const char* text, const char* text_end, ImGuiTextFlags flags)
     ImGuiWindow* window = GetCurrentWindow();
     if (window->SkipItems)
         return;
-
     ImGuiContext& g = *GImGui;
-    IM_ASSERT(text != NULL);
+
+    // Accept null ranges
+    if (text == text_end)
+        text = text_end = "";
+
+    // Calculate length
     const char* text_begin = text;
     if (text_end == NULL)
         text_end = text + strlen(text); // FIXME-OPT
@@ -3440,7 +3444,7 @@ bool ImGui::InputScalar(const char* label, ImGuiDataType data_type, void* p_data
         style.FramePadding.x = style.FramePadding.y;
         ImGuiButtonFlags button_flags = ImGuiButtonFlags_Repeat | ImGuiButtonFlags_DontClosePopups;
         if (flags & ImGuiInputTextFlags_ReadOnly)
-            PushDisabled(true);
+            BeginDisabled(true);
         SameLine(0, style.ItemInnerSpacing.x);
         if (ButtonEx("-", ImVec2(button_size, button_size), button_flags))
         {
@@ -3454,7 +3458,7 @@ bool ImGui::InputScalar(const char* label, ImGuiDataType data_type, void* p_data
             value_changed = true;
         }
         if (flags & ImGuiInputTextFlags_ReadOnly)
-            PopDisabled();
+            EndDisabled();
 
         const char* label_end = FindRenderedTextEnd(label);
         if (label != label_end)
@@ -3843,6 +3847,7 @@ static bool InputTextFilterCharacter(unsigned int* p_char, ImGuiInputTextFlags f
     unsigned int c = *p_char;
 
     // Filter non-printable (NB: isprint is unreliable! see #2467)
+    bool apply_named_filters = true;
     if (c < 0x20)
     {
         bool pass = false;
@@ -3850,6 +3855,7 @@ static bool InputTextFilterCharacter(unsigned int* p_char, ImGuiInputTextFlags f
         pass |= (c == '\t' && (flags & ImGuiInputTextFlags_AllowTabInput));
         if (!pass)
             return false;
+        apply_named_filters = false; // Override named filters below so newline and tabs can still be inserted.
     }
 
     if (input_source != ImGuiInputSource_Clipboard)
@@ -3868,7 +3874,7 @@ static bool InputTextFilterCharacter(unsigned int* p_char, ImGuiInputTextFlags f
         return false;
 
     // Generic named filters
-    if (flags & (ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank | ImGuiInputTextFlags_CharsScientific))
+    if (apply_named_filters && (flags & (ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank | ImGuiInputTextFlags_CharsScientific)))
     {
         // The libc allows overriding locale, with e.g. 'setlocale(LC_NUMERIC, "de_DE.UTF-8");' which affect the output/input of printf/scanf.
         // The standard mandate that programs starts in the "C" locale where the decimal point is '.'.
@@ -3965,14 +3971,18 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
 
     ImGuiWindow* draw_window = window;
     ImVec2 inner_size = frame_size;
+    ImGuiItemStatusFlags item_status_flags = 0;
     if (is_multiline)
     {
+        ImVec2 backup_pos = window->DC.CursorPos;
+        ItemSize(total_bb, style.FramePadding.y);
         if (!ItemAdd(total_bb, id, &frame_bb, ImGuiItemAddFlags_Focusable))
         {
-            ItemSize(total_bb, style.FramePadding.y);
             EndGroup();
             return false;
         }
+        item_status_flags = g.LastItemData.StatusFlags;
+        window->DC.CursorPos = backup_pos;
 
         // We reproduce the contents of BeginChildFrame() in order to provide 'label' so our window internal data are easier to read/debug.
         PushStyleColor(ImGuiCol_ChildBg, style.Colors[ImGuiCol_FrameBg]);
@@ -3999,6 +4009,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
         if (!(flags & ImGuiInputTextFlags_MergedItem))
             if (!ItemAdd(total_bb, id, &frame_bb, ImGuiItemAddFlags_Focusable))
                 return false;
+        item_status_flags = g.LastItemData.StatusFlags;
     }
     const bool hovered = ItemHoverable(frame_bb, id);
     if (hovered)
@@ -4007,8 +4018,8 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
     // We are only allowed to access the state if we are already the active widget.
     ImGuiInputTextState* state = GetInputTextState(id);
 
-    const bool focus_requested_by_code = (g.LastItemData.StatusFlags & ImGuiItemStatusFlags_FocusedByCode) != 0;
-    const bool focus_requested_by_tabbing = (g.LastItemData.StatusFlags & ImGuiItemStatusFlags_FocusedByTabbing) != 0;
+    const bool focus_requested_by_code = (item_status_flags & ImGuiItemStatusFlags_FocusedByCode) != 0;
+    const bool focus_requested_by_tabbing = (item_status_flags & ImGuiItemStatusFlags_FocusedByTabbing) != 0;
 
     const bool user_clicked = hovered && io.MouseClicked[0];
     const bool user_nav_input_start = (g.ActiveId != id) && ((g.NavInputId == id) || (g.NavActivateId == id && g.NavInputSource == ImGuiInputSource_Keyboard));
@@ -5887,12 +5898,12 @@ bool ImGui::TreeNodeBehavior(ImGuiID id, ImGuiTreeNodeFlags flags, const char* l
                 toggled = true;
         }
 
-        if (g.NavId == id && g.NavMoveRequest && g.NavMoveDir == ImGuiDir_Left && is_open)
+        if (g.NavId == id && g.NavMoveDir == ImGuiDir_Left && is_open)
         {
             toggled = true;
             NavMoveRequestCancel();
         }
-        if (g.NavId == id && g.NavMoveRequest && g.NavMoveDir == ImGuiDir_Right && !is_open) // If there's something upcoming on the line we may want to give it the priority?
+        if (g.NavId == id && g.NavMoveDir == ImGuiDir_Right && !is_open) // If there's something upcoming on the line we may want to give it the priority?
         {
             toggled = true;
             NavMoveRequestCancel();
@@ -6159,7 +6170,7 @@ bool ImGui::Selectable(const char* label, bool selected, ImGuiSelectableFlags fl
 
     const bool disabled_global = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
     if (disabled_item && !disabled_global) // Only testing this as an optimization
-        PushDisabled(true);
+        BeginDisabled(true);
 
     // FIXME: We can standardize the behavior of those two, we could also keep the fast path of override ClipRect + full push on render only,
     // which would be advantageous since most selectable are not selected.
@@ -6232,10 +6243,10 @@ bool ImGui::Selectable(const char* label, bool selected, ImGuiSelectableFlags fl
         CloseCurrentPopup();
 
     if (disabled_item && !disabled_global)
-        PopDisabled();
+        EndDisabled();
 
     IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags);
-    return pressed;
+    return pressed; //-V1020
 }
 
 bool ImGui::Selectable(const char* label, bool* p_selected, ImGuiSelectableFlags flags, const ImVec2& size_arg)
@@ -6680,18 +6691,17 @@ void ImGui::EndMenuBar()
         ImGuiWindow* nav_earliest_child = g.NavWindow;
         while (nav_earliest_child->ParentWindow && (nav_earliest_child->ParentWindow->Flags & ImGuiWindowFlags_ChildMenu))
             nav_earliest_child = nav_earliest_child->ParentWindow;
-        if (nav_earliest_child->ParentWindow == window && nav_earliest_child->DC.ParentLayoutType == ImGuiLayoutType_Horizontal && g.NavMoveRequestForward == ImGuiNavForward_None)
+        if (nav_earliest_child->ParentWindow == window && nav_earliest_child->DC.ParentLayoutType == ImGuiLayoutType_Horizontal && (g.NavMoveRequestFlags & ImGuiNavMoveFlags_Forwarded) == 0)
         {
             // To do so we claim focus back, restore NavId and then process the movement request for yet another frame.
-            // This involve a one-frame delay which isn't very problematic in this situation. We could remove it by scoring in advance for multiple window (probably not worth the hassle/cost)
+            // This involve a one-frame delay which isn't very problematic in this situation. We could remove it by scoring in advance for multiple window (probably not worth bothering)
             const ImGuiNavLayer layer = ImGuiNavLayer_Menu;
             IM_ASSERT(window->DC.NavLayersActiveMaskNext & (1 << layer)); // Sanity check
             FocusWindow(window);
             SetNavID(window->NavLastIds[layer], layer, 0, window->NavRectRel[layer]);
             g.NavDisableHighlight = true; // Hide highlight for the current frame so we don't see the intermediary selection.
             g.NavDisableMouseHover = g.NavMousePosDirty = true;
-            g.NavMoveRequestForward = ImGuiNavForward_ForwardQueued;
-            NavMoveRequestCancel();
+            NavMoveRequestForward(g.NavMoveDir, g.NavMoveClipDir, g.NavMoveRequestFlags); // Repeat
         }
     }
 
@@ -6824,7 +6834,7 @@ bool ImGui::BeginMenu(const char* label, bool enabled)
     ImVec2 popup_pos, pos = window->DC.CursorPos;
     PushID(label);
     if (!enabled)
-        PushDisabled();
+        BeginDisabled();
     const ImGuiMenuColumns* offsets = &window->DC.MenuColumns;
     if (window->DC.LayoutType == ImGuiLayoutType_Horizontal)
     {
@@ -6857,7 +6867,7 @@ bool ImGui::BeginMenu(const char* label, bool enabled)
         RenderArrow(window->DrawList, pos + ImVec2(offsets->OffsetMark + extra_w + g.FontSize * 0.30f, 0.0f), GetColorU32(ImGuiCol_Text), ImGuiDir_Right);
     }
     if (!enabled)
-        PopDisabled();
+        EndDisabled();
 
     const bool hovered = (g.HoveredId == id) && enabled;
     if (menuset_is_open)
@@ -6901,7 +6911,7 @@ bool ImGui::BeginMenu(const char* label, bool enabled)
             want_close = menu_is_open;
             want_open = !menu_is_open;
         }
-        if (g.NavId == id && g.NavMoveRequest && g.NavMoveDir == ImGuiDir_Right) // Nav-Right to open
+        if (g.NavId == id && g.NavMoveDir == ImGuiDir_Right) // Nav-Right to open
         {
             want_open = true;
             NavMoveRequestCancel();
@@ -6919,7 +6929,7 @@ bool ImGui::BeginMenu(const char* label, bool enabled)
         {
             want_open = true;
         }
-        else if (g.NavId == id && g.NavMoveRequest && g.NavMoveDir == ImGuiDir_Down) // Nav-Down to open
+        else if (g.NavId == id && g.NavMoveDir == ImGuiDir_Down) // Nav-Down to open
         {
             want_open = true;
             NavMoveRequestCancel();
@@ -6990,7 +7000,7 @@ bool ImGui::MenuItemEx(const char* label, const char* icon, const char* shortcut
     bool pressed;
     PushID(label);
     if (!enabled)
-        PushDisabled(true);
+        BeginDisabled(true);
     const ImGuiSelectableFlags flags = ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover;
     const ImGuiMenuColumns* offsets = &window->DC.MenuColumns;
     if (window->DC.LayoutType == ImGuiLayoutType_Horizontal)
@@ -7030,7 +7040,7 @@ bool ImGui::MenuItemEx(const char* label, const char* icon, const char* shortcut
     }
     IMGUI_TEST_ENGINE_ITEM_INFO(g.LastItemData.ID, label, g.LastItemData.StatusFlags | ImGuiItemStatusFlags_Checkable | (selected ? ImGuiItemStatusFlags_Checked : 0));
     if (!enabled)
-        PopDisabled();
+        EndDisabled();
     PopID();
 
     return pressed;
